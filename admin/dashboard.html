@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="robots" content="noindex, nofollow" />
+<title>Leads — PlayMetric Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/css/styles.css" />
+<link rel="stylesheet" href="css/admin.css" />
+</head>
+<body class="admin-app">
+
+<header class="admin-topbar">
+  <div class="admin-topbar__brand">
+    <span aria-hidden="true">
+      <img src="/media/playmetric-logo.png" alt="" class="admin-topbar__logo" />
+    </span>
+    PlayMetric Admin
+  </div>
+  <div class="admin-topbar__right">
+    <span id="adminEmail"></span>
+    <button type="button" class="btn btn--ghost btn--sm" id="logoutBtn">Log out</button>
+  </div>
+</header>
+
+<main class="admin-main">
+  <div class="admin-header">
+    <div>
+      <h1>Leads</h1>
+      <p>Demo requests captured from the marketing site.</p>
+    </div>
+    <div class="admin-filters">
+      <select id="statusFilter">
+        <option value="">All statuses</option>
+        <option value="new">New</option>
+        <option value="contacted">Contacted</option>
+        <option value="qualified">Qualified</option>
+        <option value="closed">Closed</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="admin-table-wrap">
+    <table class="admin-table" id="leadsTable" hidden>
+      <thead>
+        <tr>
+          <th>Lead</th>
+          <th>Academy</th>
+          <th>Phone</th>
+          <th>Message</th>
+          <th>Status</th>
+          <th>Received</th>
+        </tr>
+      </thead>
+      <tbody id="leadsBody"></tbody>
+    </table>
+    <div class="admin-loading" id="leadsLoading">Loading leads…</div>
+    <div class="admin-empty" id="leadsEmpty" hidden>No leads match this filter yet.</div>
+  </div>
+
+  <div class="admin-pagination" id="pagination" hidden>
+    <button type="button" id="prevPage">Previous</button>
+    <span id="pageInfo"></span>
+    <button type="button" id="nextPage">Next</button>
+  </div>
+</main>
+
+<script src="js/dashboard.js"></script>
+</body>
+</html>

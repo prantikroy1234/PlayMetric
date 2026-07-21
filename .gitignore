@@ -1,0 +1,10 @@
+node_modules/
+server/.env
+.env
+*.log
+.DS_Store
+Thumbs.db
+.claude/scheduled_tasks.lock
+
+# Reference-only asset (unclear license, never embedded in the site)
+public/media/animation-1.mp4
