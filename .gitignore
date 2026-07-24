@@ -8,3 +8,7 @@ Thumbs.db
 
 # Reference-only asset (unclear license, never embedded in the site)
 public/media/animation-1.mp4
+
+# Large, currently-unused video (50MB). Keep out of git — use Git LFS if it's
+# ever actually embedded in the site.
+public/media/signin.mp4

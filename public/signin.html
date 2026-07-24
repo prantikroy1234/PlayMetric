@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Sign In — PlayMetric</title>
+<meta name="description" content="Sign in to PlayMetric or create your academy account." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="css/styles.css" />
+<link rel="stylesheet" href="css/auth.css" />
+</head>
+<body class="auth-body">
+
+<!-- Deep-navy backdrop with softly floating dimpled spheres (pure CSS). -->
+<div class="authbg" aria-hidden="true">
+  <span class="authbg__sphere authbg__sphere--1"></span>
+  <span class="authbg__sphere authbg__sphere--2"></span>
+  <span class="authbg__sphere authbg__sphere--3"></span>
+</div>
+
+<!-- Minimal loader shown on first paint and during submits. -->
+<div class="loader" id="loader" role="status" aria-live="polite">
+  <span class="loader__spinner" aria-hidden="true"></span>
+  <p class="loader__label" id="loaderLabel">Loading…</p>
+</div>
+
+<main class="auth-shell">
+  <section class="auth-card" aria-labelledby="authHeading">
+    <a class="auth-brand" href="/" aria-label="PlayMetric home">
+      <img src="/media/playmetric-logo.png" alt="" class="auth-brand__logo" />
+      <span class="auth-brand__word">PlayMetric</span>
+    </a>
+
+    <div class="auth-avatar" aria-hidden="true">
+      <svg width="34" height="34" viewBox="0 0 24 24" fill="none">
+        <circle cx="12" cy="8.5" r="3.6" fill="currentColor" />
+        <path d="M4.5 20c0-3.8 3.2-6.4 7.5-6.4s7.5 2.6 7.5 6.4" fill="currentColor" />
+      </svg>
+      <span class="auth-avatar__dot"></span>
+    </div>
+
+    <h1 class="auth-title" id="authHeading">Welcome to PlayMetric</h1>
+    <p class="auth-subtitle" id="authSubtitle">Sign in to your academy, or create a new account.</p>
+
+    <div class="auth-tabs" role="tablist" aria-label="Sign in or create account">
+      <button class="auth-tab is-active" id="tabSignin" role="tab" aria-selected="true" aria-controls="panelSignin" type="button">Sign In</button>
+      <button class="auth-tab" id="tabSignup" role="tab" aria-selected="false" aria-controls="panelSignup" type="button">Create Account</button>
+      <span class="auth-tabs__glider" aria-hidden="true"></span>
+    </div>
+
+    <!-- Sign In -->
+    <form class="auth-form" id="signinForm" role="tabpanel" aria-labelledby="tabSignin" novalidate>
+      <label class="field">
+        <span class="field__label">Email</span>
+        <input type="email" name="email" autocomplete="email" required maxlength="254" placeholder="you@academy.in" />
+        <span class="field__error" aria-live="polite"></span>
+      </label>
+
+      <label class="field">
+        <span class="field__label">Password</span>
+        <span class="field__wrap">
+          <input type="password" name="password" autocomplete="current-password" required maxlength="200" placeholder="Your password" />
+          <button type="button" class="field__toggle" data-toggle-password aria-label="Show password">Show</button>
+        </span>
+        <span class="field__error" aria-live="polite"></span>
+      </label>
+
+      <div class="auth-row">
+        <label class="checkbox">
+          <input type="checkbox" name="remember" />
+          <span class="checkbox__box" aria-hidden="true"></span>
+          <span>Remember me</span>
+        </label>
+        <a class="auth-link" href="#" data-noop>Forgot password?</a>
+      </div>
+
+      <p class="form-error" data-form-error hidden></p>
+
+      <button type="submit" class="btn btn--solid btn--lg auth-submit">
+        <span class="auth-submit__label">Sign In</span>
+      </button>
+    </form>
+
+    <!-- Create Account -->
+    <form class="auth-form is-hidden" id="signupForm" role="tabpanel" aria-labelledby="tabSignup" novalidate>
+      <label class="field">
+        <span class="field__label">Academy name</span>
+        <input type="text" name="academyName" autocomplete="organization" required minlength="2" maxlength="80" placeholder="Sportizo Academy" />
+        <span class="field__error" aria-live="polite"></span>
+      </label>
+
+      <label class="field">
+        <span class="field__label">Your name</span>
+        <input type="text" name="fullName" autocomplete="name" required minlength="2" maxlength="60" placeholder="Jane Doe" />
+        <span class="field__error" aria-live="polite"></span>
+      </label>
+
+      <label class="field">
+        <span class="field__label">Email</span>
+        <input type="email" name="email" autocomplete="email" required maxlength="254" placeholder="you@academy.in" />
+        <span class="field__error" aria-live="polite"></span>
+      </label>
+
+      <label class="field">
+        <span class="field__label">Create password</span>
+        <span class="field__wrap">
+          <input type="password" name="password" autocomplete="new-password" required minlength="10" maxlength="200" placeholder="At least 10 characters" />
+          <button type="button" class="field__toggle" data-toggle-password aria-label="Show password">Show</button>
+        </span>
+        <span class="strength" data-strength hidden>
+          <span class="strength__bar"><span class="strength__fill"></span></span>
+          <span class="strength__label"></span>
+        </span>
+        <span class="field__error" aria-live="polite"></span>
+      </label>
+
+      <label class="field">
+        <span class="field__label">Confirm password</span>
+        <span class="field__wrap">
+          <input type="password" name="confirmPassword" autocomplete="new-password" required maxlength="200" placeholder="Re-enter password" />
+          <button type="button" class="field__toggle" data-toggle-password aria-label="Show password">Show</button>
+        </span>
+        <span class="field__error" aria-live="polite"></span>
+      </label>
+
+      <!-- Honeypot: hidden from real users; bots that fill everything trip it. -->
+      <div class="honeypot" aria-hidden="true">
+        <label>Website<input type="text" name="website" tabindex="-1" autocomplete="off" /></label>
+      </div>
+
+      <p class="form-error" data-form-error hidden></p>
+
+      <button type="submit" class="btn btn--solid btn--lg auth-submit">
+        <span class="auth-submit__label">Create Account</span>
+      </button>
+    </form>
+
+  </section>
+</main>
+
+<!-- Success state -->
+<div class="auth-success" id="authSuccess" role="dialog" aria-modal="true" aria-labelledby="successTitle" hidden>
+  <div class="auth-success__panel">
+    <div class="auth-success__icon" aria-hidden="true">
+      <svg width="26" height="26" viewBox="0 0 26 26" fill="none"><path d="M5 13.5L11 19.5L21 7.5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </div>
+    <h2 class="auth-success__title" id="successTitle">You're in</h2>
+    <p class="auth-success__text" id="successText"></p>
+    <a class="btn btn--solid btn--lg" href="/">Go to site</a>
+  </div>
+</div>
+
+<script src="js/vendor/supabase.js"></script>
+<script src="js/supabase-config.js"></script>
+<script src="js/auth.js"></script>
+</body>
+</html>

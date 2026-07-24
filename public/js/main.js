@@ -364,17 +364,25 @@
 
       const payload = Object.fromEntries(new FormData(form).entries());
 
-      try {
-        const res = await fetch('/api/leads', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-        const data = await res.json().catch(() => ({}));
+      // Honeypot: real visitors never fill this hidden field. If a bot did,
+      // fake success and skip the insert entirely — don't tip it off.
+      if (payload.website) {
+        showSuccess();
+        return;
+      }
 
-        if (!res.ok) {
-          setFieldErrors(data.details);
-          formError.textContent = data.error || 'Something went wrong. Please try again.';
+      try {
+        const { error } = await window.pmSupabase.from('leads').insert({
+          name: (payload.name || '').trim(),
+          email: (payload.email || '').trim(),
+          academy_name: (payload.academyName || '').trim(),
+          phone: (payload.phone || '').trim(),
+          message: (payload.message || '').trim(),
+          source: 'hero-book-demo',
+        });
+
+        if (error) {
+          formError.textContent = 'Something went wrong. Please try again.';
           formError.hidden = false;
           submitBtn.disabled = false;
           submitBtn.dataset.loading = 'false';
