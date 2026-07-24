@@ -50,16 +50,27 @@ dev servers.**
   1. `supabase/migrations/0001_init.sql` — orgs, venues, sports, courts, time_slots, staff,
      org_members, RLS, helper functions.
   2. `supabase/migrations/0002_leads.sql` — public "Book a Demo" lead capture.
-  3. Staff bootstrap block at the bottom of `supabase/seed.sql` (insert yourself into `staff`
+  3. `supabase/migrations/0003_onboarding.sql` — trigger on `auth.users` insert that
+     auto-provisions org + owner `staff` row + `org_members` when a signup carries an
+     `academy_name` (guarded so hand-made platform admins are skipped).
+  4. Staff bootstrap block at the bottom of `supabase/seed.sql` (insert yourself into `staff`
      with `is_platform_admin = true`).
 - `supabase/seed.sql` seeds Sportizo/Calirox/Demo + their venues/sports/courts/timeslots.
   **Keep it in sync with `console/src/lib/data/seedData.js`** (the local-mode mirror).
 
 ### Auth & RLS model — READ THIS
 - Auth = Supabase Auth (email confirmation currently **ON**).
+- **Self-serve model (B2B):** academies **sign up themselves** on the marketing `/signin` page
+  (Academy name + Your name + email + password). The `0003` trigger provisions their org +
+  owner staff row automatically, so they land in a console scoped to their own academy. Signup
+  passes metadata keys `academy_name` + `full_name` — the trigger reads exactly those.
 - `staff` mirrors `auth.users`. `org_members` maps staff→org. `is_platform_admin=true` = sees
   all tenants. RLS on every table is keyed on org membership via the SECURITY DEFINER helper
   `is_org_member()` (avoids policy recursion).
+- **Per-tenant scoping (decided, NOT yet built in the UI):** an academy owner should see ONLY
+  their org — the console must drop the org-picker/"All Organisations" controls for single-org
+  members and scope every screen to their one org. Platform admin keeps the multi-org view.
+  RLS already isolates the *data*; this is a UI change to the existing screens.
 - **THE #1 GOTCHA:** a signed-in user with **no `staff` row correctly sees ZERO rows** — this
   is RLS working, not a bug. If the console looks empty after login, that's almost always why.
   The console shows a "no staff record" screen with the exact fix SQL.
@@ -109,10 +120,36 @@ dev servers.**
 Role, Users & Staff, Actions & Hierarchy, Contracts, Clients, Analytics, Reviews, Tickets.
 Route + sidebar are wired; the page renders a `Placeholder`.
 
-**Recommended next:** the **RBAC backbone (Users / Roles / Actions)** — every later module
-wants to check permissions against it, so build it before feature screens. Alternative:
-**Booking Management** (most demo-friendly; courts + time-slots now exist to book against).
-Decision was left to the user.
+## ⭐ NEXT SESSION — START HERE (ordered build plan)
+
+The user wants the full per-academy console built out, **one module at a time**, **fully
+manual** for now (academy enters data by hand). The Hudle/Playo/District booking-sync
+automation comes later, once those APIs are available — do NOT build integrations yet.
+
+Build in this order:
+
+1. **Login → console redirect + per-tenant scoping** (the "Sportizo logs in → Sportizo's own
+   console" flow). Same-origin `/app` was chosen: serve the built console under the marketing
+   origin at `/app`, wire `/signin` success → `/app`, retire the console's standalone login
+   (its Gate redirects unauthenticated → `/signin`). Then scope every screen to the logged-in
+   academy's org and hide org-pickers for single-org members (see "Per-tenant scoping" above).
+2. **Booking Management** (`/bookings`) — manual. New `bookings` table (org_id, court_id,
+   sport_id, date, start/end time, client name, status, amount, `source` default 'manual').
+   Calendar Day/Week/Month + "New Booking" modal + sub-tabs Calendar/Inventory/Documents/
+   Transactions/Reviews. Org/venue/sport filters. RLS on org_id.
+3. **Financial Management** (`/financials`) — manual. `finance_entries` table (org_id,
+   direction inflow|outflow, category, label, amount, date). Inflow vs Outflow ledger,
+   Add Custom Expense, CSV upload stub, export. RLS on org_id.
+4. Then the rest as feature screens: Dashboard, Clients, Contracts, Reviews, Tickets,
+   Analytics, and the RBAC backbone (Users / Roles / Actions).
+
+Reference screenshots of the target live console for every module were shared 2026-07-24/25
+(booking calendar, financial inflow/outflow ledger, roles matrix, users table, actions
+hierarchy, contracts, clients LTV table, analytics, reviews, kanban tickets).
+
+Each new module: add the table + RLS to a new `supabase/migrations/000N_*.sql`, mirror the
+shape in `console/src/lib/data/seedData.js`, add the entity to the data adapters, and reuse
+`components/ui.jsx` + the `pages/facility/` CRUD pattern.
 
 ---
 
@@ -123,8 +160,10 @@ Decision was left to the user.
 - **Never share/commit the Supabase service_role key.** Anon key is fine.
 - Two bits of harmless housekeeping outstanding: a `pmtester` test auth user in Supabase, and
   the orphaned local `playmetric` MongoDB database (nothing uses it). User to clean up if/when.
-- GitHub repo: `github.com/prantikroy1234/PlayMetric` (public). The console + supabase +
-  Mongo-removal changes are **uncommitted** as of this writing.
+- GitHub repo: `github.com/prantikroy1234/PlayMetric` (public). Everything through the auth
+  redesign + onboarding trigger is committed & pushed to `main`. `console/.env.local` and
+  `server/.env` (secrets) and `public/media/signin.mp4` (50MB, unused) are gitignored — the
+  console reads Supabase creds from `console/.env.local` (present locally, not in git).
 
 ## History (how we got here)
 Started as a marketing site + Express/Mongo admin. Built a football-themed sign-in page, then
