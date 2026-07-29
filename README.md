@@ -7,6 +7,10 @@ level.
 
 Live tenants modelled in the demo data: **Sportizo**, **Calirox**, **Demo**.
 
+> 📘 **New to the codebase, or explaining it to a non-technical audience?**
+> Read **[API_calls.md](API_calls.md)** first — every API call in plain English, with
+> analogies, click-by-click walk-throughs, and a Q&A section.
+
 ---
 
 ## Table of contents
