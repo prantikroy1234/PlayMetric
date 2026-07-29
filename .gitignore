@@ -18,3 +18,6 @@ public/media/API Issue.mp4
 
 # Agent working notes — kept local, not published.
 CLAUDE.md
+
+# Local agent/tooling config — kept local, not published.
+.claude/
