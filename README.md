@@ -613,4 +613,4 @@ Adding a module follows one path every time:
 5. Apply the `isPlatformAdmin` scoping pattern.
 6. Add the route in `App.jsx`.
 
-`CLAUDE.md` holds the working notes and conventions in more depth.
+See [API_calls.md](API_calls.md) for a plain-English tour of how the pieces talk to each other.
