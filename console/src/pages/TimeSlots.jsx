@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { data } from '../lib/data';
+import { useAuth } from '../lib/auth';
 import { useToast } from '../lib/toast';
 import { PageHeader, Avatar, Chip, SearchInline } from '../components/ui';
 import { IconPlus, IconBuilding } from '../components/Icons';
@@ -16,8 +17,16 @@ export default function TimeSlots() {
   const [query, setQuery] = useState('');
   const [editing, setEditing] = useState(null);
   const toast = useToast();
+  const { isPlatformAdmin } = useAuth();
 
   const { orgs, rows, loading, refresh, byId } = useFacility('timeSlots', orgId);
+
+  // Scoped academy owners skip the "pick an org first" step entirely — their
+  // single org is auto-selected and the picker is hidden.
+  const showOrgPicker = isPlatformAdmin || orgs.length > 1;
+  useEffect(() => {
+    if (!isPlatformAdmin && !orgId && orgs.length) setOrgId(orgs[0].id);
+  }, [isPlatformAdmin, orgId, orgs]);
 
   async function save(form) {
     const { id, ...rest } = form;
@@ -93,19 +102,21 @@ export default function TimeSlots() {
       />
 
       <div className="toolbar">
-        <select
-          className="select-inline"
-          value={orgId}
-          onChange={(e) => setOrgId(e.target.value)}
-          aria-label="Organisation"
-        >
-          <option value="">Select One</option>
-          {orgs.map((o) => (
-            <option key={o.id} value={o.id}>
-              {o.name}
-            </option>
-          ))}
-        </select>
+        {showOrgPicker && (
+          <select
+            className="select-inline"
+            value={orgId}
+            onChange={(e) => setOrgId(e.target.value)}
+            aria-label="Organisation"
+          >
+            <option value="">Select One</option>
+            {orgs.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.name}
+              </option>
+            ))}
+          </select>
+        )}
         {orgId && (
           <>
             <span className="toolbar__spacer" />

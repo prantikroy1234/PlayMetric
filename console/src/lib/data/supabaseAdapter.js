@@ -50,4 +50,48 @@ export const supabaseAdapter = {
   sports: makeRepo('sports'),
   courts: makeRepo('courts'),
   timeSlots: makeRepo('time_slots', { orderBy: 'start_time' }),
+  bookings: makeRepo('bookings', { orderBy: 'booking_date' }),
+  financeEntries: makeRepo('finance_entries', { orderBy: 'entry_date', ascending: false }),
+  clients: makeRepo('clients'),
+  contracts: makeRepo('contracts', { orderBy: 'end_date' }),
+  reviews: makeRepo('reviews', { orderBy: 'review_date', ascending: false }),
+  tickets: makeRepo('tickets', { orderBy: 'created_at' }),
+
+  /* ---- RBAC ---- */
+  staff: makeRepo('staff', { orderBy: 'full_name' }),
+  orgMembers: makeRepo('org_members', { orderBy: 'created_at' }),
+  actions: makeRepo('actions', { orderBy: 'sort_order' }),
+  roles: makeRepo('roles', { orderBy: 'name' }),
+
+  // Composite-keyed (role_id, action_id): upsert on the compound key rather
+  // than the generic id-based create/update.
+  rolePermissions: {
+    async list(filters = {}) {
+      let q = supabase.from('role_permissions').select('*');
+      for (const [k, v] of Object.entries(filters)) {
+        if (v != null) q = q.eq(k, v);
+      }
+      const { data, error } = await q;
+      if (error) throw error;
+      return data ?? [];
+    },
+    async set(row) {
+      const { data, error } = await supabase
+        .from('role_permissions')
+        .upsert(row, { onConflict: 'role_id,action_id' })
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    async setMany(rows) {
+      if (rows.length === 0) return [];
+      const { data, error } = await supabase
+        .from('role_permissions')
+        .upsert(rows, { onConflict: 'role_id,action_id' })
+        .select();
+      if (error) throw error;
+      return data ?? [];
+    },
+  },
 };

@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { data } from '../lib/data';
+import { useAuth } from '../lib/auth';
 import { useToast } from '../lib/toast';
 import { PageHeader, Avatar, Chip, SearchInline } from '../components/ui';
 import { IconPlus, IconPin, IconBuilding, IconBall, IconLayers, IconClock } from '../components/Icons';
@@ -67,9 +68,18 @@ export default function Facility() {
   const [query, setQuery] = useState('');
   const [editing, setEditing] = useState(null);
   const toast = useToast();
+  const { isPlatformAdmin } = useAuth();
 
   const { orgs, venues, sports, rows, loading, refresh, byId } = useFacility(tab.entity, orgId);
   const copy = COPY[tabKey];
+
+  // Academy owners are scoped to their own org(s): drop the cross-org picker
+  // and its "All Organisations" option, and lock the view to their org. Only
+  // platform admins (and the local demo) browse across tenants.
+  const showOrgPicker = isPlatformAdmin || orgs.length > 1;
+  useEffect(() => {
+    if (!isPlatformAdmin && !orgId && orgs.length) setOrgId(orgs[0].id);
+  }, [isPlatformAdmin, orgId, orgs]);
 
   const blank = useMemo(
     () => ({
@@ -252,19 +262,21 @@ export default function Facility() {
       />
 
       <div className="toolbar">
-        <select
-          className="select-inline"
-          value={orgId}
-          onChange={(e) => setOrgId(e.target.value)}
-          aria-label="Filter by organisation"
-        >
-          <option value="">All Organisations</option>
-          {orgs.map((o) => (
-            <option key={o.id} value={o.id}>
-              {o.name}
-            </option>
-          ))}
-        </select>
+        {showOrgPicker && (
+          <select
+            className="select-inline"
+            value={orgId}
+            onChange={(e) => setOrgId(e.target.value)}
+            aria-label="Filter by organisation"
+          >
+            {isPlatformAdmin && <option value="">All Organisations</option>}
+            {orgs.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.name}
+              </option>
+            ))}
+          </select>
+        )}
         <span className="toolbar__spacer" />
         <SearchInline value={query} onChange={setQuery} placeholder={`Search ${tab.label.toLowerCase()}…`} />
       </div>

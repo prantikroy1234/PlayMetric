@@ -9,8 +9,24 @@ import { IconDatabase } from './components/Icons';
 import Organisations from './pages/Organisations';
 import Facility from './pages/Facility';
 import TimeSlots from './pages/TimeSlots';
+import Bookings from './pages/Bookings';
+import Financials from './pages/Financials';
+import Dashboard from './pages/Dashboard';
+import Clients from './pages/Clients';
+import Contracts from './pages/Contracts';
+import Reviews from './pages/Reviews';
+import Tickets from './pages/Tickets';
+import Analytics from './pages/Analytics';
+import Users from './pages/Users';
+import Roles from './pages/Roles';
+import Actions from './pages/Actions';
 import Placeholder from './pages/Placeholder';
-import Login, { NoStaffRecord } from './pages/Login';
+import { NoStaffRecord } from './pages/Login';
+
+// Where an unauthenticated visitor is sent. The console lives under /app on the
+// marketing origin, so the football sign-in page is a same-origin sibling.
+// Overridable for standalone console dev on a different origin.
+const SIGNIN_URL = import.meta.env.VITE_SIGNIN_URL || '/signin.html';
 
 function DataModeBanner() {
   if (dataMode === 'supabase') return null;
@@ -28,18 +44,24 @@ function DataModeBanner() {
 
 const stub = (title, subtitle) => <Placeholder title={title} subtitle={subtitle} />;
 
-// Decides between the login screen, the "no staff row" helper, and the console.
+// Decides between the console, the "no staff row" helper, and bouncing an
+// unauthenticated visitor back to the marketing sign-in page. The console no
+// longer has its own login form — sign-in happens once on /signin and the
+// session is shared because both live on the same origin.
 function Gate({ children }) {
   const { status } = useAuth();
+  if (status === 'signed-out') {
+    window.location.assign(SIGNIN_URL);
+    return <div className="login__splash">Redirecting to sign in…</div>;
+  }
   if (status === 'loading') return <div className="login__splash">Loading console…</div>;
-  if (status === 'signed-out') return <Login />;
   if (status === 'no-staff-record') return <NoStaffRecord />;
   return children;
 }
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter basename="/app">
       <AuthProvider>
       <ToastProvider>
         <Gate>
@@ -50,57 +72,24 @@ export default function App() {
             <main className="content">
               <DataModeBanner />
               <Routes>
-                <Route
-                  path="/"
-                  element={stub('Overview', "Welcome back, here's what's happening at your academy.")}
-                />
-                <Route
-                  path="/bookings"
-                  element={stub('Booking Management', 'Manage and schedule venue courts')}
-                />
-                <Route
-                  path="/financials"
-                  element={stub('Financial Management', 'Aggregated at Business Level')}
-                />
+                <Route path="/" element={<Dashboard />} />
+                <Route path="/bookings" element={<Bookings />} />
+                <Route path="/financials" element={<Financials />} />
 
                 <Route path="/organisation" element={<Organisations />} />
                 <Route path="/timeslot" element={<TimeSlots />} />
                 <Route path="/facility-management" element={<Facility />} />
 
-                <Route
-                  path="/users/roles"
-                  element={stub('Roles & Permissions', 'Configure fine-grained module access for team roles.')}
-                />
-                <Route
-                  path="/users"
-                  element={stub('Users & Staff', 'Manage roles, permissions, and internal team access')}
-                />
-                <Route
-                  path="/actions"
-                  element={stub('Actions & Hierarchy', 'Configure system subsystems, modules, submodules, and permission mappings')}
-                />
+                <Route path="/users/roles" element={<Roles />} />
+                <Route path="/users" element={<Users />} />
+                <Route path="/actions" element={<Actions />} />
 
-                <Route
-                  path="/contracts"
-                  element={stub('Contracts & Agreements', 'Manage all legal documents, leases, and service agreements')}
-                />
-                <Route
-                  path="/clients"
-                  element={stub('Client Directory', 'Manage individual players, teams, and corporate accounts')}
-                />
+                <Route path="/contracts" element={<Contracts />} />
+                <Route path="/clients" element={<Clients />} />
 
-                <Route
-                  path="/analytics"
-                  element={stub('Business Analytics', 'Data-driven insights for venue performance')}
-                />
-                <Route
-                  path="/reviews"
-                  element={stub('Consolidated Reviews', 'Monitor client feedback and venue ratings')}
-                />
-                <Route
-                  path="/tickets"
-                  element={stub('Support Tickets', 'Client inquiries, issue tracking, and maintenance requests')}
-                />
+                <Route path="/analytics" element={<Analytics />} />
+                <Route path="/reviews" element={<Reviews />} />
+                <Route path="/tickets" element={<Tickets />} />
 
                 <Route path="*" element={stub('Not found', 'That page does not exist in the console.')} />
               </Routes>

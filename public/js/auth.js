@@ -197,6 +197,10 @@
     }
   }
 
+  // Where a signed-in academy lands: the admin console, served same-origin
+  // under /app so it inherits this page's Supabase session.
+  const CONSOLE_URL = '/app';
+
   // Sign in
   signinForm.addEventListener('submit', (e) => {
     e.preventDefault();
@@ -208,7 +212,9 @@
       });
       if (error) throw new Error(mapAuthError(error.message));
       const name = data.user?.user_metadata?.full_name || data.user?.email || 'there';
-      return { title: "You're in", text: `Signed in as ${name}. Good to see you back.` };
+      // Show the success beat, then hand off to the console.
+      setTimeout(() => window.location.assign(CONSOLE_URL), 650);
+      return { title: "You're in", text: `Signed in as ${name}. Taking you to your console…` };
     });
   });
 
@@ -240,7 +246,10 @@
           text: `We've sent a confirmation link to ${email}. Click it to finish setting up ${academyName}.`,
         };
       }
-      return { title: "You're in", text: `${academyName} is ready. Welcome to PlayMetric.` };
+      // Confirmation off — the onboarding trigger has provisioned their org, so
+      // send them straight into the console.
+      setTimeout(() => window.location.assign(CONSOLE_URL), 650);
+      return { title: "You're in", text: `${academyName} is ready. Taking you to your console…` };
     });
   });
 

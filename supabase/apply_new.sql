@@ -1,4 +1,411 @@
 -- ============================================================================
+-- PlayMetric — apply_new.sql  (convenience bundle for a FRESH database)
+-- Paste + Run ONCE in the Supabase SQL Editor. Creates the tables added this
+-- session + booking→finance link, then seeds demo data. Idempotent seeds.
+-- If tables already exist, DON'T run this — run seed.sql (data) and, if you
+-- haven't yet, migrations/0010_finance_booking_link.sql (the booking link).
+-- ============================================================================
+
+-- >>> migrations/0004_bookings.sql
+-- ============================================================================
+-- PlayMetric — 0004_bookings
+-- Manual booking management. An academy enters bookings by hand (walk-ins,
+-- phone reservations, memberships). The `source` column defaults to 'manual'
+-- so that when the Hudle/Playo/District sync lands later, imported rows can be
+-- distinguished from hand-entered ones without a schema change.
+--
+-- Tenancy: bookings carry org_id and are gated by the same is_org_member()
+-- helper as every other tenant table (see 0001_init).
+-- ============================================================================
+
+create table public.bookings (
+  id           uuid primary key default gen_random_uuid(),
+  org_id       uuid not null references public.organisations(id) on delete cascade,
+  -- venue/court/sport are nullable so a booking survives a court being removed
+  -- from configuration; the calendar still shows the client and time.
+  venue_id     uuid references public.venues(id) on delete set null,
+  court_id     uuid references public.courts(id) on delete set null,
+  sport_id     uuid references public.sports(id) on delete set null,
+  booking_date date not null,
+  start_time   time not null,
+  end_time     time not null,
+  client_name  text not null,
+  client_phone text,
+  -- confirmed | pending | cancelled | completed
+  status       text not null default 'confirmed',
+  -- Rupee amount for the session. Kept on the booking so Financials can read
+  -- inflow straight from here later.
+  amount       numeric(10,2) not null default 0,
+  -- 'manual' now; 'hudle' | 'playo' | 'district' once integrations exist.
+  source       text not null default 'manual',
+  notes        text,
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now(),
+  constraint bookings_valid_range check (end_time > start_time),
+  constraint bookings_status_check
+    check (status in ('confirmed', 'pending', 'cancelled', 'completed'))
+);
+
+create index on public.bookings (org_id);
+create index on public.bookings (court_id);
+create index on public.bookings (org_id, booking_date);
+
+create trigger bookings_set_updated_at
+  before update on public.bookings
+  for each row execute function public.set_updated_at();
+
+-- ---------------------------------------------------------------------------
+-- Row Level Security — same membership gate as the facility tables.
+-- ---------------------------------------------------------------------------
+alter table public.bookings enable row level security;
+
+create policy bookings_select on public.bookings
+  for select to authenticated
+  using (public.is_org_member(org_id));
+
+create policy bookings_insert on public.bookings
+  for insert to authenticated
+  with check (public.is_org_member(org_id));
+
+create policy bookings_update on public.bookings
+  for update to authenticated
+  using (public.is_org_member(org_id))
+  with check (public.is_org_member(org_id));
+
+create policy bookings_delete on public.bookings
+  for delete to authenticated
+  using (public.is_org_member(org_id));
+
+-- >>> migrations/0005_finance.sql
+-- ============================================================================
+-- PlayMetric — 0005_finance
+-- Manual financial ledger. An academy records money in (bookings revenue,
+-- memberships, coaching) and money out (rent, salaries, utilities, equipment)
+-- by hand. Bookings already carry an `amount`, so inflow could eventually be
+-- derived from there — but this table stays SEPARATE so custom/one-off entries
+-- (and future CSV imports) live somewhere that isn't tied to a booking row.
+--
+-- Tenancy: same org_id + is_org_member() gate as every other tenant table.
+-- ============================================================================
+
+create table public.finance_entries (
+  id         uuid primary key default gen_random_uuid(),
+  org_id     uuid not null references public.organisations(id) on delete cascade,
+  -- 'inflow' (revenue) | 'outflow' (expense)
+  direction  text not null,
+  -- Free-form bucket, e.g. Bookings / Membership / Rent / Salaries / Utilities.
+  category   text not null,
+  label      text not null,
+  amount     numeric(10,2) not null default 0,
+  entry_date date not null,
+  -- Cash / UPI / Card / Bank Transfer — optional.
+  method     text,
+  notes      text,
+  -- 'manual' now; 'csv' | 'bookings' once import/derivation exist.
+  source     text not null default 'manual',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint finance_entries_direction_check
+    check (direction in ('inflow', 'outflow')),
+  constraint finance_entries_amount_check
+    check (amount >= 0)
+);
+
+create index on public.finance_entries (org_id);
+create index on public.finance_entries (org_id, entry_date);
+
+create trigger finance_entries_set_updated_at
+  before update on public.finance_entries
+  for each row execute function public.set_updated_at();
+
+-- ---------------------------------------------------------------------------
+-- Row Level Security — same membership gate as the facility/booking tables.
+-- ---------------------------------------------------------------------------
+alter table public.finance_entries enable row level security;
+
+create policy finance_entries_select on public.finance_entries
+  for select to authenticated
+  using (public.is_org_member(org_id));
+
+create policy finance_entries_insert on public.finance_entries
+  for insert to authenticated
+  with check (public.is_org_member(org_id));
+
+create policy finance_entries_update on public.finance_entries
+  for update to authenticated
+  using (public.is_org_member(org_id))
+  with check (public.is_org_member(org_id));
+
+create policy finance_entries_delete on public.finance_entries
+  for delete to authenticated
+  using (public.is_org_member(org_id));
+
+-- >>> migrations/0006_clients.sql
+-- ============================================================================
+-- PlayMetric — 0006_clients
+-- Client directory. The people/teams/companies an academy sells court time to.
+-- Deliberately SEPARATE from `staff` (console users) — a client never signs in.
+--
+-- LTV / booking-count are derived, not stored: the console sums a client's
+-- bookings by matching name within the org (bookings are captured as free-text
+-- client_name today). A proper bookings.client_id FK + a client picker in the
+-- booking form is the future upgrade; name-matching keeps the demo honest now.
+--
+-- Tenancy: same org_id + is_org_member() gate as every other tenant table.
+-- ============================================================================
+
+create table public.clients (
+  id         uuid primary key default gen_random_uuid(),
+  org_id     uuid not null references public.organisations(id) on delete cascade,
+  name       text not null,
+  phone      text,
+  email      text,
+  -- individual | team | corporate
+  type       text not null default 'individual',
+  notes      text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint clients_type_check check (type in ('individual', 'team', 'corporate'))
+);
+
+create index on public.clients (org_id);
+
+create trigger clients_set_updated_at
+  before update on public.clients
+  for each row execute function public.set_updated_at();
+
+-- ---------------------------------------------------------------------------
+-- Row Level Security — same membership gate as the other tenant tables.
+-- ---------------------------------------------------------------------------
+alter table public.clients enable row level security;
+
+create policy clients_select on public.clients
+  for select to authenticated
+  using (public.is_org_member(org_id));
+
+create policy clients_insert on public.clients
+  for insert to authenticated
+  with check (public.is_org_member(org_id));
+
+create policy clients_update on public.clients
+  for update to authenticated
+  using (public.is_org_member(org_id))
+  with check (public.is_org_member(org_id));
+
+create policy clients_delete on public.clients
+  for delete to authenticated
+  using (public.is_org_member(org_id));
+
+-- >>> migrations/0007_contracts.sql
+-- ============================================================================
+-- PlayMetric — 0007_contracts
+-- Legal documents an academy manages: venue leases, service agreements,
+-- sponsorships, and membership contracts. Manual entry for now.
+--
+-- `client_id` optionally links a contract to a row in the clients directory
+-- (e.g. a corporate membership) — nullable, because most counterparties
+-- (landlords, vendors, sponsors) are NOT clients; those keep a free-text
+-- `counterparty`.
+--
+-- Tenancy: same org_id + is_org_member() gate as every other tenant table.
+-- ============================================================================
+
+create table public.contracts (
+  id           uuid primary key default gen_random_uuid(),
+  org_id       uuid not null references public.organisations(id) on delete cascade,
+  client_id    uuid references public.clients(id) on delete set null,
+  title        text not null,
+  counterparty text not null,
+  -- lease | service | sponsorship | membership
+  type         text not null default 'service',
+  -- draft | active | expired | terminated
+  status       text not null default 'draft',
+  start_date   date,
+  end_date     date,
+  value        numeric(12,2) not null default 0,
+  notes        text,
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now(),
+  constraint contracts_type_check
+    check (type in ('lease', 'service', 'sponsorship', 'membership')),
+  constraint contracts_status_check
+    check (status in ('draft', 'active', 'expired', 'terminated')),
+  constraint contracts_valid_range
+    check (end_date is null or start_date is null or end_date >= start_date)
+);
+
+create index on public.contracts (org_id);
+create index on public.contracts (client_id);
+
+create trigger contracts_set_updated_at
+  before update on public.contracts
+  for each row execute function public.set_updated_at();
+
+-- ---------------------------------------------------------------------------
+-- Row Level Security — same membership gate as the other tenant tables.
+-- ---------------------------------------------------------------------------
+alter table public.contracts enable row level security;
+
+create policy contracts_select on public.contracts
+  for select to authenticated
+  using (public.is_org_member(org_id));
+
+create policy contracts_insert on public.contracts
+  for insert to authenticated
+  with check (public.is_org_member(org_id));
+
+create policy contracts_update on public.contracts
+  for update to authenticated
+  using (public.is_org_member(org_id))
+  with check (public.is_org_member(org_id));
+
+create policy contracts_delete on public.contracts
+  for delete to authenticated
+  using (public.is_org_member(org_id));
+
+-- >>> migrations/0008_reviews.sql
+-- ============================================================================
+-- PlayMetric — 0008_reviews
+-- Consolidated client reviews / venue ratings. Manual entry for now (an academy
+-- records feedback it collects); later this is where imported Google/Playo
+-- reviews would land.
+--
+-- Optional FKs (client/venue/sport) let a review be attributed and filtered,
+-- but stay nullable so a walk-in's feedback can still be captured. `author_name`
+-- is the display name (may or may not match a client row).
+--
+-- Tenancy: same org_id + is_org_member() gate as every other tenant table.
+-- ============================================================================
+
+create table public.reviews (
+  id           uuid primary key default gen_random_uuid(),
+  org_id       uuid not null references public.organisations(id) on delete cascade,
+  client_id    uuid references public.clients(id) on delete set null,
+  venue_id     uuid references public.venues(id) on delete set null,
+  sport_id     uuid references public.sports(id) on delete set null,
+  rating       smallint not null,
+  title        text,
+  body         text not null,
+  author_name  text not null,
+  -- published | hidden
+  status       text not null default 'published',
+  review_date  date not null,
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now(),
+  constraint reviews_rating_check check (rating between 1 and 5),
+  constraint reviews_status_check check (status in ('published', 'hidden'))
+);
+
+create index on public.reviews (org_id);
+create index on public.reviews (org_id, rating);
+
+create trigger reviews_set_updated_at
+  before update on public.reviews
+  for each row execute function public.set_updated_at();
+
+-- ---------------------------------------------------------------------------
+-- Row Level Security — same membership gate as the other tenant tables.
+-- ---------------------------------------------------------------------------
+alter table public.reviews enable row level security;
+
+create policy reviews_select on public.reviews
+  for select to authenticated
+  using (public.is_org_member(org_id));
+
+create policy reviews_insert on public.reviews
+  for insert to authenticated
+  with check (public.is_org_member(org_id));
+
+create policy reviews_update on public.reviews
+  for update to authenticated
+  using (public.is_org_member(org_id))
+  with check (public.is_org_member(org_id));
+
+create policy reviews_delete on public.reviews
+  for delete to authenticated
+  using (public.is_org_member(org_id));
+
+-- >>> migrations/0009_tickets.sql
+-- ============================================================================
+-- PlayMetric — 0009_tickets
+-- Support / maintenance tickets. Client inquiries, issue tracking, and facility
+-- maintenance requests — the kanban board in the console. Manual entry for now.
+--
+-- `client_id` is optional (a maintenance ticket has no client). `status` is the
+-- kanban column; `priority` drives the card colour.
+--
+-- Tenancy: same org_id + is_org_member() gate as every other tenant table.
+-- ============================================================================
+
+create table public.tickets (
+  id          uuid primary key default gen_random_uuid(),
+  org_id      uuid not null references public.organisations(id) on delete cascade,
+  client_id   uuid references public.clients(id) on delete set null,
+  title       text not null,
+  description text,
+  category    text not null default 'General',
+  -- low | medium | high
+  priority    text not null default 'medium',
+  -- open | in_progress | resolved | closed
+  status      text not null default 'open',
+  assignee    text,
+  due_date    date,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now(),
+  constraint tickets_priority_check check (priority in ('low', 'medium', 'high')),
+  constraint tickets_status_check check (status in ('open', 'in_progress', 'resolved', 'closed'))
+);
+
+create index on public.tickets (org_id);
+create index on public.tickets (org_id, status);
+
+create trigger tickets_set_updated_at
+  before update on public.tickets
+  for each row execute function public.set_updated_at();
+
+-- ---------------------------------------------------------------------------
+-- Row Level Security — same membership gate as the other tenant tables.
+-- ---------------------------------------------------------------------------
+alter table public.tickets enable row level security;
+
+create policy tickets_select on public.tickets
+  for select to authenticated
+  using (public.is_org_member(org_id));
+
+create policy tickets_insert on public.tickets
+  for insert to authenticated
+  with check (public.is_org_member(org_id));
+
+create policy tickets_update on public.tickets
+  for update to authenticated
+  using (public.is_org_member(org_id))
+  with check (public.is_org_member(org_id));
+
+create policy tickets_delete on public.tickets
+  for delete to authenticated
+  using (public.is_org_member(org_id));
+
+-- >>> migrations/0010_finance_booking_link.sql
+-- ============================================================================
+-- PlayMetric — 0010_finance_booking_link
+-- Links a finance_entries row back to the booking that generated it, so the
+-- console can keep booking revenue and its refund in sync automatically:
+--   * booking confirmed/completed  → an 'inflow' entry (category Bookings)
+--   * booking cancelled            → a 'Refund' 'outflow' entry reverses it
+-- Manual finance entries leave booking_id null. `on delete cascade` cleans up
+-- the generated rows if the booking itself is deleted.
+--
+-- Safe to re-run (guards with IF NOT EXISTS).
+-- ============================================================================
+
+alter table public.finance_entries
+  add column if not exists booking_id uuid references public.bookings(id) on delete cascade;
+
+create index if not exists finance_entries_booking_id_idx
+  on public.finance_entries (booking_id);
+
+-- >>> seed.sql
+-- ============================================================================
 -- PlayMetric — demo seed
 -- Mirrors the organisations/venues/sports visible in the live console so the
 -- rebuilt screens look real from the first run.
@@ -191,248 +598,6 @@ insert into public.tickets
   ('bbbbbbbb-bbbb-4bbb-8bbb-000000000008', '11111111-1111-4111-8111-000000000002', null,                                     'Locker room deep clean',           'Monthly deep clean scheduled.',                                 'Maintenance', 'low',    'resolved',    'Housekeeping', current_date - 2),
   ('bbbbbbbb-bbbb-4bbb-8bbb-000000000009', '11111111-1111-4111-8111-000000000003', null,                                     'Sample support ticket',            'Demo ticket for the board.',                                    'General',     'low',    'open',        'Demo',         current_date + 6)
 on conflict (id) do nothing;
-
--- ---------------------------------------------------------------------------
--- RBAC catalogue: actions (4-level tree), system roles, and the role x action
--- permission matrix. Generated from console/src/lib/data/seedData.js.
---
--- NOTE: `staff` / `org_members` are NOT seeded here — staff.id is a FK to
--- auth.users, so those rows appear when people actually sign up.
--- ---------------------------------------------------------------------------
-insert into public.actions (id, parent_id, level, code, name, sort_order) values
-  ('eeeeeeee-eeee-4eee-8eee-000000000001', null, 'subsystem', null, 'CRM', 0),
-  ('eeeeeeee-eeee-4eee-8eee-000000000002', 'eeeeeeee-eeee-4eee-8eee-000000000001', 'module', null, 'Dashboard', 0),
-  ('eeeeeeee-eeee-4eee-8eee-000000000003', 'eeeeeeee-eeee-4eee-8eee-000000000002', 'submodule', null, 'Overview', 0),
-  ('eeeeeeee-eeee-4eee-8eee-000000000004', 'eeeeeeee-eeee-4eee-8eee-000000000003', 'action', 'ac-101', 'View dashboard', 0),
-  ('eeeeeeee-eeee-4eee-8eee-000000000005', 'eeeeeeee-eeee-4eee-8eee-000000000001', 'module', null, 'Booking Management', 1),
-  ('eeeeeeee-eeee-4eee-8eee-000000000006', 'eeeeeeee-eeee-4eee-8eee-000000000005', 'submodule', null, 'Calendar', 0),
-  ('eeeeeeee-eeee-4eee-8eee-000000000007', 'eeeeeeee-eeee-4eee-8eee-000000000006', 'action', 'ac-201', 'View calendar', 0),
-  ('eeeeeeee-eeee-4eee-8eee-000000000008', 'eeeeeeee-eeee-4eee-8eee-000000000006', 'action', 'ac-202', 'Create booking', 1),
-  ('eeeeeeee-eeee-4eee-8eee-000000000009', 'eeeeeeee-eeee-4eee-8eee-000000000006', 'action', 'ac-203', 'Edit booking', 2),
-  ('eeeeeeee-eeee-4eee-8eee-000000000010', 'eeeeeeee-eeee-4eee-8eee-000000000006', 'action', 'ac-204', 'Cancel booking', 3),
-  ('eeeeeeee-eeee-4eee-8eee-000000000011', 'eeeeeeee-eeee-4eee-8eee-000000000005', 'submodule', null, 'Transactions', 1),
-  ('eeeeeeee-eeee-4eee-8eee-000000000012', 'eeeeeeee-eeee-4eee-8eee-000000000011', 'action', 'ac-205', 'View transactions', 0),
-  ('eeeeeeee-eeee-4eee-8eee-000000000013', 'eeeeeeee-eeee-4eee-8eee-000000000011', 'action', 'ac-206', 'Export transactions', 1),
-  ('eeeeeeee-eeee-4eee-8eee-000000000014', 'eeeeeeee-eeee-4eee-8eee-000000000001', 'module', null, 'Financial Management', 2),
-  ('eeeeeeee-eeee-4eee-8eee-000000000015', 'eeeeeeee-eeee-4eee-8eee-000000000014', 'submodule', null, 'Overview', 0),
-  ('eeeeeeee-eeee-4eee-8eee-000000000016', 'eeeeeeee-eeee-4eee-8eee-000000000015', 'action', 'ac-301', 'View financial overview', 0),
-  ('eeeeeeee-eeee-4eee-8eee-000000000017', 'eeeeeeee-eeee-4eee-8eee-000000000014', 'submodule', null, 'Ledger', 1),
-  ('eeeeeeee-eeee-4eee-8eee-000000000018', 'eeeeeeee-eeee-4eee-8eee-000000000017', 'action', 'ac-302', 'View ledger', 0),
-  ('eeeeeeee-eeee-4eee-8eee-000000000019', 'eeeeeeee-eeee-4eee-8eee-000000000017', 'action', 'ac-303', 'Add entry', 1),
-  ('eeeeeeee-eeee-4eee-8eee-000000000020', 'eeeeeeee-eeee-4eee-8eee-000000000017', 'action', 'ac-304', 'Edit entry', 2),
-  ('eeeeeeee-eeee-4eee-8eee-000000000021', 'eeeeeeee-eeee-4eee-8eee-000000000017', 'action', 'ac-305', 'Export CSV', 3),
-  ('eeeeeeee-eeee-4eee-8eee-000000000022', 'eeeeeeee-eeee-4eee-8eee-000000000001', 'module', null, 'Configuration', 3),
-  ('eeeeeeee-eeee-4eee-8eee-000000000023', 'eeeeeeee-eeee-4eee-8eee-000000000022', 'submodule', null, 'Academy', 0),
-  ('eeeeeeee-eeee-4eee-8eee-000000000024', 'eeeeeeee-eeee-4eee-8eee-000000000023', 'action', 'ac-401', 'View academy', 0),
-  ('eeeeeeee-eeee-4eee-8eee-000000000025', 'eeeeeeee-eeee-4eee-8eee-000000000023', 'action', 'ac-402', 'Edit academy', 1),
-  ('eeeeeeee-eeee-4eee-8eee-000000000026', 'eeeeeeee-eeee-4eee-8eee-000000000022', 'submodule', null, 'Facility', 1),
-  ('eeeeeeee-eeee-4eee-8eee-000000000027', 'eeeeeeee-eeee-4eee-8eee-000000000026', 'action', 'ac-403', 'Manage venues', 0),
-  ('eeeeeeee-eeee-4eee-8eee-000000000028', 'eeeeeeee-eeee-4eee-8eee-000000000026', 'action', 'ac-404', 'Manage courts', 1),
-  ('eeeeeeee-eeee-4eee-8eee-000000000029', 'eeeeeeee-eeee-4eee-8eee-000000000026', 'action', 'ac-405', 'Manage sports', 2),
-  ('eeeeeeee-eeee-4eee-8eee-000000000030', 'eeeeeeee-eeee-4eee-8eee-000000000026', 'action', 'ac-406', 'Manage time slots', 3),
-  ('eeeeeeee-eeee-4eee-8eee-000000000031', 'eeeeeeee-eeee-4eee-8eee-000000000001', 'module', null, 'Operations', 4),
-  ('eeeeeeee-eeee-4eee-8eee-000000000032', 'eeeeeeee-eeee-4eee-8eee-000000000031', 'submodule', null, 'Clients', 0),
-  ('eeeeeeee-eeee-4eee-8eee-000000000033', 'eeeeeeee-eeee-4eee-8eee-000000000032', 'action', 'ac-501', 'View clients', 0),
-  ('eeeeeeee-eeee-4eee-8eee-000000000034', 'eeeeeeee-eeee-4eee-8eee-000000000032', 'action', 'ac-502', 'Manage clients', 1),
-  ('eeeeeeee-eeee-4eee-8eee-000000000035', 'eeeeeeee-eeee-4eee-8eee-000000000031', 'submodule', null, 'Contracts', 1),
-  ('eeeeeeee-eeee-4eee-8eee-000000000036', 'eeeeeeee-eeee-4eee-8eee-000000000035', 'action', 'ac-503', 'View contracts', 0),
-  ('eeeeeeee-eeee-4eee-8eee-000000000037', 'eeeeeeee-eeee-4eee-8eee-000000000035', 'action', 'ac-504', 'Manage contracts', 1),
-  ('eeeeeeee-eeee-4eee-8eee-000000000038', 'eeeeeeee-eeee-4eee-8eee-000000000001', 'module', null, 'Insights & Support', 5),
-  ('eeeeeeee-eeee-4eee-8eee-000000000039', 'eeeeeeee-eeee-4eee-8eee-000000000038', 'submodule', null, 'Analytics', 0),
-  ('eeeeeeee-eeee-4eee-8eee-000000000040', 'eeeeeeee-eeee-4eee-8eee-000000000039', 'action', 'ac-601', 'View analytics', 0),
-  ('eeeeeeee-eeee-4eee-8eee-000000000041', 'eeeeeeee-eeee-4eee-8eee-000000000038', 'submodule', null, 'Reviews', 1),
-  ('eeeeeeee-eeee-4eee-8eee-000000000042', 'eeeeeeee-eeee-4eee-8eee-000000000041', 'action', 'ac-602', 'View reviews', 0),
-  ('eeeeeeee-eeee-4eee-8eee-000000000043', 'eeeeeeee-eeee-4eee-8eee-000000000041', 'action', 'ac-603', 'Manage reviews', 1),
-  ('eeeeeeee-eeee-4eee-8eee-000000000044', 'eeeeeeee-eeee-4eee-8eee-000000000038', 'submodule', null, 'Tickets', 2),
-  ('eeeeeeee-eeee-4eee-8eee-000000000045', 'eeeeeeee-eeee-4eee-8eee-000000000044', 'action', 'ac-604', 'View tickets', 0),
-  ('eeeeeeee-eeee-4eee-8eee-000000000046', 'eeeeeeee-eeee-4eee-8eee-000000000044', 'action', 'ac-605', 'Manage tickets', 1),
-  ('eeeeeeee-eeee-4eee-8eee-000000000047', 'eeeeeeee-eeee-4eee-8eee-000000000001', 'module', null, 'Permissions', 6),
-  ('eeeeeeee-eeee-4eee-8eee-000000000048', 'eeeeeeee-eeee-4eee-8eee-000000000047', 'submodule', null, 'Users', 0),
-  ('eeeeeeee-eeee-4eee-8eee-000000000049', 'eeeeeeee-eeee-4eee-8eee-000000000048', 'action', 'ac-701', 'View users', 0),
-  ('eeeeeeee-eeee-4eee-8eee-000000000050', 'eeeeeeee-eeee-4eee-8eee-000000000048', 'action', 'ac-702', 'Manage users', 1),
-  ('eeeeeeee-eeee-4eee-8eee-000000000051', 'eeeeeeee-eeee-4eee-8eee-000000000047', 'submodule', null, 'Roles', 1),
-  ('eeeeeeee-eeee-4eee-8eee-000000000052', 'eeeeeeee-eeee-4eee-8eee-000000000051', 'action', 'ac-703', 'View roles', 0),
-  ('eeeeeeee-eeee-4eee-8eee-000000000053', 'eeeeeeee-eeee-4eee-8eee-000000000051', 'action', 'ac-704', 'Manage roles', 1),
-  ('eeeeeeee-eeee-4eee-8eee-000000000054', 'eeeeeeee-eeee-4eee-8eee-000000000047', 'submodule', null, 'Actions', 2),
-  ('eeeeeeee-eeee-4eee-8eee-000000000055', 'eeeeeeee-eeee-4eee-8eee-000000000054', 'action', 'ac-705', 'View actions', 0),
-  ('eeeeeeee-eeee-4eee-8eee-000000000056', 'eeeeeeee-eeee-4eee-8eee-000000000054', 'action', 'ac-706', 'Manage actions', 1)
-on conflict (id) do nothing;
-
-insert into public.roles (id, org_id, key, name, description, is_system) values
-  ('dddddddd-dddd-4ddd-8ddd-000000000001', null, 'owner', 'Owner', 'Full access, including permissions', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000002', null, 'manager', 'Manager', 'Day-to-day operations; cannot change permissions', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000003', null, 'front_desk', 'Front Desk', 'Bookings, clients, and support tickets', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000004', null, 'accountant', 'Accountant', 'Financial records and contracts', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000005', null, 'coach', 'Coach', 'Read-only schedule and feedback', true)
-on conflict (id) do nothing;
-
-insert into public.role_permissions (role_id, action_id, allowed) values
-  ('dddddddd-dddd-4ddd-8ddd-000000000001', 'eeeeeeee-eeee-4eee-8eee-000000000004', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000001', 'eeeeeeee-eeee-4eee-8eee-000000000007', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000001', 'eeeeeeee-eeee-4eee-8eee-000000000008', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000001', 'eeeeeeee-eeee-4eee-8eee-000000000009', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000001', 'eeeeeeee-eeee-4eee-8eee-000000000010', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000001', 'eeeeeeee-eeee-4eee-8eee-000000000012', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000001', 'eeeeeeee-eeee-4eee-8eee-000000000013', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000001', 'eeeeeeee-eeee-4eee-8eee-000000000016', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000001', 'eeeeeeee-eeee-4eee-8eee-000000000018', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000001', 'eeeeeeee-eeee-4eee-8eee-000000000019', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000001', 'eeeeeeee-eeee-4eee-8eee-000000000020', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000001', 'eeeeeeee-eeee-4eee-8eee-000000000021', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000001', 'eeeeeeee-eeee-4eee-8eee-000000000024', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000001', 'eeeeeeee-eeee-4eee-8eee-000000000025', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000001', 'eeeeeeee-eeee-4eee-8eee-000000000027', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000001', 'eeeeeeee-eeee-4eee-8eee-000000000028', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000001', 'eeeeeeee-eeee-4eee-8eee-000000000029', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000001', 'eeeeeeee-eeee-4eee-8eee-000000000030', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000001', 'eeeeeeee-eeee-4eee-8eee-000000000033', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000001', 'eeeeeeee-eeee-4eee-8eee-000000000034', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000001', 'eeeeeeee-eeee-4eee-8eee-000000000036', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000001', 'eeeeeeee-eeee-4eee-8eee-000000000037', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000001', 'eeeeeeee-eeee-4eee-8eee-000000000040', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000001', 'eeeeeeee-eeee-4eee-8eee-000000000042', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000001', 'eeeeeeee-eeee-4eee-8eee-000000000043', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000001', 'eeeeeeee-eeee-4eee-8eee-000000000045', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000001', 'eeeeeeee-eeee-4eee-8eee-000000000046', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000001', 'eeeeeeee-eeee-4eee-8eee-000000000049', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000001', 'eeeeeeee-eeee-4eee-8eee-000000000050', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000001', 'eeeeeeee-eeee-4eee-8eee-000000000052', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000001', 'eeeeeeee-eeee-4eee-8eee-000000000053', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000001', 'eeeeeeee-eeee-4eee-8eee-000000000055', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000001', 'eeeeeeee-eeee-4eee-8eee-000000000056', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000002', 'eeeeeeee-eeee-4eee-8eee-000000000004', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000002', 'eeeeeeee-eeee-4eee-8eee-000000000007', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000002', 'eeeeeeee-eeee-4eee-8eee-000000000008', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000002', 'eeeeeeee-eeee-4eee-8eee-000000000009', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000002', 'eeeeeeee-eeee-4eee-8eee-000000000010', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000002', 'eeeeeeee-eeee-4eee-8eee-000000000012', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000002', 'eeeeeeee-eeee-4eee-8eee-000000000013', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000002', 'eeeeeeee-eeee-4eee-8eee-000000000016', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000002', 'eeeeeeee-eeee-4eee-8eee-000000000018', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000002', 'eeeeeeee-eeee-4eee-8eee-000000000019', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000002', 'eeeeeeee-eeee-4eee-8eee-000000000020', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000002', 'eeeeeeee-eeee-4eee-8eee-000000000021', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000002', 'eeeeeeee-eeee-4eee-8eee-000000000024', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000002', 'eeeeeeee-eeee-4eee-8eee-000000000025', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000002', 'eeeeeeee-eeee-4eee-8eee-000000000027', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000002', 'eeeeeeee-eeee-4eee-8eee-000000000028', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000002', 'eeeeeeee-eeee-4eee-8eee-000000000029', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000002', 'eeeeeeee-eeee-4eee-8eee-000000000030', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000002', 'eeeeeeee-eeee-4eee-8eee-000000000033', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000002', 'eeeeeeee-eeee-4eee-8eee-000000000034', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000002', 'eeeeeeee-eeee-4eee-8eee-000000000036', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000002', 'eeeeeeee-eeee-4eee-8eee-000000000037', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000002', 'eeeeeeee-eeee-4eee-8eee-000000000040', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000002', 'eeeeeeee-eeee-4eee-8eee-000000000042', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000002', 'eeeeeeee-eeee-4eee-8eee-000000000043', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000002', 'eeeeeeee-eeee-4eee-8eee-000000000045', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000002', 'eeeeeeee-eeee-4eee-8eee-000000000046', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000002', 'eeeeeeee-eeee-4eee-8eee-000000000049', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000002', 'eeeeeeee-eeee-4eee-8eee-000000000050', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000002', 'eeeeeeee-eeee-4eee-8eee-000000000052', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000002', 'eeeeeeee-eeee-4eee-8eee-000000000053', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000002', 'eeeeeeee-eeee-4eee-8eee-000000000055', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000002', 'eeeeeeee-eeee-4eee-8eee-000000000056', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000003', 'eeeeeeee-eeee-4eee-8eee-000000000004', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000003', 'eeeeeeee-eeee-4eee-8eee-000000000007', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000003', 'eeeeeeee-eeee-4eee-8eee-000000000008', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000003', 'eeeeeeee-eeee-4eee-8eee-000000000009', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000003', 'eeeeeeee-eeee-4eee-8eee-000000000010', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000003', 'eeeeeeee-eeee-4eee-8eee-000000000012', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000003', 'eeeeeeee-eeee-4eee-8eee-000000000013', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000003', 'eeeeeeee-eeee-4eee-8eee-000000000016', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000003', 'eeeeeeee-eeee-4eee-8eee-000000000018', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000003', 'eeeeeeee-eeee-4eee-8eee-000000000019', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000003', 'eeeeeeee-eeee-4eee-8eee-000000000020', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000003', 'eeeeeeee-eeee-4eee-8eee-000000000021', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000003', 'eeeeeeee-eeee-4eee-8eee-000000000024', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000003', 'eeeeeeee-eeee-4eee-8eee-000000000025', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000003', 'eeeeeeee-eeee-4eee-8eee-000000000027', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000003', 'eeeeeeee-eeee-4eee-8eee-000000000028', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000003', 'eeeeeeee-eeee-4eee-8eee-000000000029', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000003', 'eeeeeeee-eeee-4eee-8eee-000000000030', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000003', 'eeeeeeee-eeee-4eee-8eee-000000000033', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000003', 'eeeeeeee-eeee-4eee-8eee-000000000034', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000003', 'eeeeeeee-eeee-4eee-8eee-000000000036', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000003', 'eeeeeeee-eeee-4eee-8eee-000000000037', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000003', 'eeeeeeee-eeee-4eee-8eee-000000000040', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000003', 'eeeeeeee-eeee-4eee-8eee-000000000042', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000003', 'eeeeeeee-eeee-4eee-8eee-000000000043', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000003', 'eeeeeeee-eeee-4eee-8eee-000000000045', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000003', 'eeeeeeee-eeee-4eee-8eee-000000000046', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000003', 'eeeeeeee-eeee-4eee-8eee-000000000049', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000003', 'eeeeeeee-eeee-4eee-8eee-000000000050', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000003', 'eeeeeeee-eeee-4eee-8eee-000000000052', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000003', 'eeeeeeee-eeee-4eee-8eee-000000000053', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000003', 'eeeeeeee-eeee-4eee-8eee-000000000055', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000003', 'eeeeeeee-eeee-4eee-8eee-000000000056', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000004', 'eeeeeeee-eeee-4eee-8eee-000000000004', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000004', 'eeeeeeee-eeee-4eee-8eee-000000000007', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000004', 'eeeeeeee-eeee-4eee-8eee-000000000008', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000004', 'eeeeeeee-eeee-4eee-8eee-000000000009', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000004', 'eeeeeeee-eeee-4eee-8eee-000000000010', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000004', 'eeeeeeee-eeee-4eee-8eee-000000000012', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000004', 'eeeeeeee-eeee-4eee-8eee-000000000013', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000004', 'eeeeeeee-eeee-4eee-8eee-000000000016', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000004', 'eeeeeeee-eeee-4eee-8eee-000000000018', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000004', 'eeeeeeee-eeee-4eee-8eee-000000000019', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000004', 'eeeeeeee-eeee-4eee-8eee-000000000020', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000004', 'eeeeeeee-eeee-4eee-8eee-000000000021', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000004', 'eeeeeeee-eeee-4eee-8eee-000000000024', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000004', 'eeeeeeee-eeee-4eee-8eee-000000000025', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000004', 'eeeeeeee-eeee-4eee-8eee-000000000027', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000004', 'eeeeeeee-eeee-4eee-8eee-000000000028', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000004', 'eeeeeeee-eeee-4eee-8eee-000000000029', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000004', 'eeeeeeee-eeee-4eee-8eee-000000000030', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000004', 'eeeeeeee-eeee-4eee-8eee-000000000033', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000004', 'eeeeeeee-eeee-4eee-8eee-000000000034', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000004', 'eeeeeeee-eeee-4eee-8eee-000000000036', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000004', 'eeeeeeee-eeee-4eee-8eee-000000000037', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000004', 'eeeeeeee-eeee-4eee-8eee-000000000040', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000004', 'eeeeeeee-eeee-4eee-8eee-000000000042', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000004', 'eeeeeeee-eeee-4eee-8eee-000000000043', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000004', 'eeeeeeee-eeee-4eee-8eee-000000000045', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000004', 'eeeeeeee-eeee-4eee-8eee-000000000046', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000004', 'eeeeeeee-eeee-4eee-8eee-000000000049', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000004', 'eeeeeeee-eeee-4eee-8eee-000000000050', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000004', 'eeeeeeee-eeee-4eee-8eee-000000000052', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000004', 'eeeeeeee-eeee-4eee-8eee-000000000053', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000004', 'eeeeeeee-eeee-4eee-8eee-000000000055', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000004', 'eeeeeeee-eeee-4eee-8eee-000000000056', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000005', 'eeeeeeee-eeee-4eee-8eee-000000000004', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000005', 'eeeeeeee-eeee-4eee-8eee-000000000007', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000005', 'eeeeeeee-eeee-4eee-8eee-000000000008', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000005', 'eeeeeeee-eeee-4eee-8eee-000000000009', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000005', 'eeeeeeee-eeee-4eee-8eee-000000000010', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000005', 'eeeeeeee-eeee-4eee-8eee-000000000012', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000005', 'eeeeeeee-eeee-4eee-8eee-000000000013', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000005', 'eeeeeeee-eeee-4eee-8eee-000000000016', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000005', 'eeeeeeee-eeee-4eee-8eee-000000000018', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000005', 'eeeeeeee-eeee-4eee-8eee-000000000019', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000005', 'eeeeeeee-eeee-4eee-8eee-000000000020', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000005', 'eeeeeeee-eeee-4eee-8eee-000000000021', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000005', 'eeeeeeee-eeee-4eee-8eee-000000000024', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000005', 'eeeeeeee-eeee-4eee-8eee-000000000025', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000005', 'eeeeeeee-eeee-4eee-8eee-000000000027', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000005', 'eeeeeeee-eeee-4eee-8eee-000000000028', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000005', 'eeeeeeee-eeee-4eee-8eee-000000000029', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000005', 'eeeeeeee-eeee-4eee-8eee-000000000030', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000005', 'eeeeeeee-eeee-4eee-8eee-000000000033', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000005', 'eeeeeeee-eeee-4eee-8eee-000000000034', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000005', 'eeeeeeee-eeee-4eee-8eee-000000000036', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000005', 'eeeeeeee-eeee-4eee-8eee-000000000037', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000005', 'eeeeeeee-eeee-4eee-8eee-000000000040', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000005', 'eeeeeeee-eeee-4eee-8eee-000000000042', true),
-  ('dddddddd-dddd-4ddd-8ddd-000000000005', 'eeeeeeee-eeee-4eee-8eee-000000000043', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000005', 'eeeeeeee-eeee-4eee-8eee-000000000045', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000005', 'eeeeeeee-eeee-4eee-8eee-000000000046', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000005', 'eeeeeeee-eeee-4eee-8eee-000000000049', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000005', 'eeeeeeee-eeee-4eee-8eee-000000000050', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000005', 'eeeeeeee-eeee-4eee-8eee-000000000052', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000005', 'eeeeeeee-eeee-4eee-8eee-000000000053', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000005', 'eeeeeeee-eeee-4eee-8eee-000000000055', false),
-  ('dddddddd-dddd-4ddd-8ddd-000000000005', 'eeeeeeee-eeee-4eee-8eee-000000000056', false)
-on conflict (role_id, action_id) do nothing;
 
 -- ---------------------------------------------------------------------------
 -- Staff bootstrap — run AFTER creating your first user in Supabase Auth.

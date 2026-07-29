@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { data } from '../lib/data';
+import { useAuth } from '../lib/auth';
 import { useToast } from '../lib/toast';
 import {
   PageHeader, Avatar, Chip, Field, Modal, ConfirmModal,
@@ -163,6 +164,12 @@ export default function Organisations() {
   const [deleting, setDeleting] = useState(null);
   const [busy, setBusy] = useState(false);
   const toast = useToast();
+  const { isPlatformAdmin } = useAuth();
+
+  // Only PlayMetric's own team creates or removes tenants (RLS enforces this
+  // too). A scoped academy owner sees just their own org and can edit its
+  // details, but not add or delete organisations.
+  const canManageOrgs = isPlatformAdmin;
 
   const refresh = async () => {
     setLoading(true);
@@ -221,12 +228,18 @@ export default function Organisations() {
   return (
     <>
       <PageHeader
-        title="Organisations Directory"
-        subtitle="Manage company details, subdomains, and main office locations"
+        title={canManageOrgs ? 'Organisations Directory' : 'Your Academy'}
+        subtitle={
+          canManageOrgs
+            ? 'Manage company details, subdomains, and main office locations'
+            : 'Your academy’s company details, subdomain, and office location'
+        }
         actions={
-          <button className="btn btn--primary" onClick={() => setEditing('new')}>
-            <IconPlus width={16} height={16} /> Add Organisation
-          </button>
+          canManageOrgs && (
+            <button className="btn btn--primary" onClick={() => setEditing('new')}>
+              <IconPlus width={16} height={16} /> Add Organisation
+            </button>
+          )
         }
       />
 
@@ -283,9 +296,11 @@ export default function Organisations() {
                       <button className="linkbtn" onClick={() => setEditing(o)}>
                         <IconEdit width={14} height={14} /> Edit
                       </button>
-                      <button className="linkbtn linkbtn--danger" onClick={() => setDeleting(o)}>
-                        <IconTrash width={14} height={14} /> Delete
-                      </button>
+                      {canManageOrgs && (
+                        <button className="linkbtn linkbtn--danger" onClick={() => setDeleting(o)}>
+                          <IconTrash width={14} height={14} /> Delete
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -304,7 +319,7 @@ export default function Organisations() {
                 : 'Add your first organisation to start configuring venues and sports.'
             }
             action={
-              !query && (
+              !query && canManageOrgs && (
                 <button className="btn btn--primary" onClick={() => setEditing('new')}>
                   <IconPlus width={16} height={16} /> Add Organisation
                 </button>

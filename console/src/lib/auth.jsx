@@ -68,7 +68,20 @@ export function AuthProvider({ children }) {
 
   return (
     <AuthContext.Provider
-      value={{ session, staff, status, signIn, signOut, authEnabled: isSupabaseConfigured }}
+      value={{
+        session,
+        staff,
+        status,
+        signIn,
+        signOut,
+        authEnabled: isSupabaseConfigured,
+        // Platform admins (PlayMetric's own team) see every tenant; academy
+        // owners are scoped to their own org(s). Screens use this to decide
+        // whether to show cross-org pickers. RLS enforces the data boundary
+        // regardless — this only shapes the UI. In local demo mode the stub
+        // staff is a platform admin so every org is visible.
+        isPlatformAdmin: Boolean(staff?.is_platform_admin),
+      }}
     >
       {children}
     </AuthContext.Provider>

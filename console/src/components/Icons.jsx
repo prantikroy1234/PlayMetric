@@ -126,6 +126,20 @@ export const IconBell = make(
   </>
 );
 export const IconChevronDown = make(<path d="m6 9 6 6 6-6" />);
+export const IconChevronLeft = make(<path d="m15 6-6 6 6 6" />);
+export const IconChevronRight = make(<path d="m9 6 6 6-6 6" />);
+export const IconCheckCircle = make(
+  <>
+    <circle cx="12" cy="12" r="9" />
+    <path d="m8.5 12 2.5 2.5 4.5-5" />
+  </>
+);
+export const IconXCircle = make(
+  <>
+    <circle cx="12" cy="12" r="9" />
+    <path d="m9 9 6 6M15 9l-6 6" />
+  </>
+);
 export const IconPlus = make(<path d="M12 5v14M5 12h14" />);
 export const IconEdit = make(
   <>

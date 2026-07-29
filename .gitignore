@@ -12,3 +12,6 @@ public/media/animation-1.mp4
 # Large, currently-unused video (50MB). Keep out of git — use Git LFS if it's
 # ever actually embedded in the site.
 public/media/signin.mp4
+
+# Screen recording (345MB) — far over GitHub's 100MB per-file hard limit.
+public/media/API Issue.mp4
